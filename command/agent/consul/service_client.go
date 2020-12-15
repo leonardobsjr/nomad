@@ -855,6 +855,8 @@ func (c *ServiceClient) serviceRegs(ops *operations, service *structs.Service, w
 		return nil, fmt.Errorf("unable to get address for service %q: %v", service.Name, err)
 	}
 
+	fmt.Println("SH REGS service:", service.Name, "ip:", ip, "portL:", service.PortLabel, "port:", port)
+
 	// Determine whether to use tags or canary_tags
 	var tags []string
 	if workload.Canary && len(service.CanaryTags) > 0 {
@@ -891,11 +893,26 @@ func (c *ServiceClient) serviceRegs(ops *operations, service *structs.Service, w
 	// This enables the consul UI to show that Nomad registered this service
 	meta["external-source"] = "nomad"
 
-	// Explicitly set the service kind in case this service represents a Connect gateway.
+	// Explicitly set the Consul service Kind in case this service represents
+	// one of the Connect gateway types.
 	kind := api.ServiceKindTypical
-	if service.Connect.IsGateway() {
+	switch {
+	case service.Connect.IsIngress():
 		kind = api.ServiceKindIngressGateway
+	case service.Connect.IsTerminating():
+		kind = api.ServiceKindTerminatingGateway
+		// set the default port! (if bridge / default listener set)
+		// maybe patch this before-hand?
+		if nominal, exists := service.Connect.Gateway.Proxy.EnvoyGatewayBindAddresses["default"]; exists {
+			portLabel := fmt.Sprintf("%s-%s", structs.ConnectTerminatingPrefix, service.Name)
+			if dynPort, ok := workload.Ports.Get(portLabel); ok {
+				fmt.Println("SH got dynPort:", dynPort)
+				nominal.Port = dynPort.Value
+			}
+			fmt.Println("SH nominal:", nominal)
+		}
 	}
+	fmt.Println("SH SC kind:", kind)
 
 	// Build the Consul Service registration request
 	serviceReg := &api.AgentServiceRegistration{
