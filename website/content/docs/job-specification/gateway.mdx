@@ -324,8 +324,6 @@ job "countdash-terminating" {
   group "api" {
     network {
       mode = "host"
-
-
       port "port" {
         static = "9001"
       }
@@ -410,9 +408,9 @@ job "countdash-terminating" {
         sidecar_service {
           proxy {
             upstreams {
-              # By configuring an upstream destination to
-              # the linked service of the terminating gateway, the dashboard is able to make
-              # requests through the gateway to the count-api service.
+              # By configuring an upstream destination to the linked service of
+              # the terminating gateway, the dashboard is able to make requests
+              # through the gateway to the count-api service.
               destination_name = "count-api"
               local_bind_port  = 8080
             }
