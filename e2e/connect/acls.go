@@ -28,6 +28,9 @@ const (
 
 	// demoConnectIngressGateway is the example ingress gateway job useful for testing
 	demoConnectIngressGateway = "connect/input/ingress-gateway.nomad"
+
+	// demoConnectTerminatingGateway is the example terminating gateway job useful for testing
+	demoConnectTerminatingGateway = "connect/input/terminating-gateway.nomad"
 )
 
 type ConnectACLsE2ETest struct {
