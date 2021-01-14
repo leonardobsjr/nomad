@@ -351,7 +351,7 @@ func (tc *ConnectACLsE2ETest) TestConnectACLsConnectTerminatingGatewayDemo(f *fr
 
 	policyID := tc.createConsulPolicy(consulPolicy{
 		Name:  "nomad-operator-policy",
-		Rules: `service "terminator" { policy = "write" } service "legacy" { policy = "write" }`,
+		Rules: `service "api-gateway" { policy = "write" } service "count-dashboard" { policy = "write" }`,
 	}, f)
 	operatorToken := tc.createOperatorToken(policyID, f)
 	t.Log("created operator token:", operatorToken)
@@ -365,8 +365,8 @@ func (tc *ConnectACLsE2ETest) TestConnectACLsConnectTerminatingGatewayDemo(f *fr
 
 	foundSITokens := tc.countSITokens(t)
 	f.Equal(2, len(foundSITokens), "expected 2 SI tokens total: %v", foundSITokens)
-	f.Equal(1, foundSITokens["connect-terminating-terminator"], "expected 1 SI token for connect-terminating-terminator: %v", foundSITokens)
-	f.Equal(1, foundSITokens["dashboard"], "expected 1 SI token for dashboard: %v", foundSITokens)
+	f.Equal(1, foundSITokens["connect-terminating-api-gateway"], "expected 1 SI token for connect-terminating-api-gateway: %v", foundSITokens)
+	f.Equal(1, foundSITokens["connect-proxy-count-dashboard"], "expected 1 SI token for count-dashboard: %v", foundSITokens)
 
 	t.Log("connect terminating gateway job with ACLs enabled finished")
 }
