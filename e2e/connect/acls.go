@@ -354,7 +354,21 @@ func (tc *ConnectACLsE2ETest) TestConnectACLsConnectTerminatingGatewayDemo(f *fr
 		Rules: `service "terminator" { policy = "write" } service "legacy" { policy = "write" }`,
 	}, f)
 	operatorToken := tc.createOperatorToken(policyID, f)
-	t.Log("cr")
+	t.Log("created operator token:", operatorToken)
+
+	jobID := connectJobID()
+	tc.jobIDs = append(tc.jobIDs, jobID)
+
+	allocs := e2eutil.RegisterAndWaitForAllocs(t, tc.Nomad(), demoConnectTerminatingGateway, jobID, operatorToken)
+	allocIDs := e2eutil.AllocIDsFromAllocationListStubs(allocs)
+	e2eutil.WaitForAllocsRunning(t, tc.Nomad(), allocIDs)
+
+	foundSITokens := tc.countSITokens(t)
+	f.Equal(2, len(foundSITokens), "expected 2 SI tokens total: %v", foundSITokens)
+	f.Equal(1, foundSITokens["connect-terminating-terminator"], "expected 1 SI token for connect-terminating-terminator: %v", foundSITokens)
+	f.Equal(1, foundSITokens["dashboard"], "expected 1 SI token for dashboard: %v", foundSITokens)
+
+	t.Log("connect terminating gateway job with ACLs enabled finished")
 }
 
 var (
