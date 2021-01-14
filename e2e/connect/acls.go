@@ -342,6 +342,21 @@ func (tc *ConnectACLsE2ETest) TestConnectACLsConnectIngressGatewayDemo(f *framew
 	t.Log("connect ingress gateway job with ACLs enabled finished")
 }
 
+func (tc *ConnectACLsE2ETest) TestConnectACLsConnectTerminatingGatewayDemo(f *framework.F) {
+	t := f.T()
+
+	t.Log("test register Connect Terminating Gateway job w/ ACLs enabled")
+
+	// setup ACL policy and mint operator token
+
+	policyID := tc.createConsulPolicy(consulPolicy{
+		Name:  "nomad-operator-policy",
+		Rules: `service "terminator" { policy = "write" } service "legacy" { policy = "write" }`,
+	}, f)
+	operatorToken := tc.createOperatorToken(policyID, f)
+	t.Log("cr")
+}
+
 var (
 	siTokenRe = regexp.MustCompile(`_nomad_si \[[\w-]{36}] \[[\w-]{36}] \[([\S]+)]`)
 )
