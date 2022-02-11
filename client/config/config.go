@@ -445,23 +445,6 @@ func (c *ClientTemplateConfig) Merge(b *ClientTemplateConfig) *ClientTemplateCon
 	return &result
 }
 
-func (c *ClientTemplateConfig) IsEmpty() bool {
-	if c == nil {
-		return true
-	}
-
-	return !c.DisableSandbox &&
-		len(c.FunctionDenylist) == 0 &&
-		len(c.FunctionBlacklist) == 0 &&
-		c.BlockQueryWaitTime == nil &&
-		c.BlockQueryWaitTimeHCL == "" &&
-		c.MaxStale == nil &&
-		c.MaxStaleHCL == "" &&
-		c.Wait.IsEmpty() &&
-		c.ConsulRetry.IsEmpty() &&
-		c.VaultRetry.IsEmpty()
-}
-
 // WaitConfig is mirrored from templateconfig.WaitConfig because we need to handle
 // the HCL conversion which happens in agent.ParseConfigFile
 // NOTE: Since Consul Template requires pointers, this type uses pointers to fields

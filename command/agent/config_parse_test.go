@@ -860,3 +860,56 @@ func permutations(arr []string) [][]string {
 	helper(arr, len(arr))
 	return res
 }
+
+func TestConfig_Parse_Client_TemplateConfig_FunctionDenylist(t *testing.T) {
+	t.Parallel()
+
+	defaultFunctionDenyList := DefaultConfig().Client.TemplateConfig.FunctionDenylist
+
+	cases := []struct {
+		File     string
+		Expected []string
+	}{
+		{
+			"client_with_function_denylist.hcl",
+			[]string{"foo"},
+		},
+		{
+			"client_with_function_denylist_empty.hcl",
+			nil,
+		},
+		{
+			"client_with_function_denylist_empty_string.hcl",
+			nil,
+		},
+		{
+			"client_with_function_denylist_nil.hcl",
+			defaultFunctionDenyList,
+		},
+		{
+			"client_with_empty_template.hcl",
+			defaultFunctionDenyList,
+		},
+		{
+			"minimal_client.hcl",
+			defaultFunctionDenyList,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.File, func(t *testing.T) {
+			path, err := filepath.Abs(filepath.Join("./test-resources", tc.File))
+			require.NoError(t, err)
+
+			parsed, err := ParseConfigFile(path)
+			require.NoError(t, err)
+
+			var actual []string
+			if tc.Expected != nil {
+				actual = parsed.Client.TemplateConfig.FunctionDenylist
+			}
+
+			require.EqualValues(t, tc.Expected, actual)
+		})
+	}
+}
