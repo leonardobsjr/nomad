@@ -350,15 +350,12 @@ func progressMade(result *structs.PlanResult) bool {
 }
 
 // taintedNodes is used to scan the allocations and then check if the
-// underlying nodes are tainted, and should force a migration of the allocation.
-// All the nodes returned in the map are tainted.
+// underlying nodes are tainted, and should force a migration of the allocation,
+// or if the underlying nodes are disconnected, and should be used to calculate
+// the reconnect timeout of its allocations. All the nodes returned in the map are tainted.
 func taintedNodes(state State, allocs []*structs.Allocation) (map[string]*structs.Node, error) {
 	out := make(map[string]*structs.Node)
 	for _, alloc := range allocs {
-		if _, ok := out[alloc.NodeID]; ok {
-			continue
-		}
-
 		ws := memdb.NewWatchSet()
 		node, err := state.NodeByID(ws, alloc.NodeID)
 		if err != nil {
@@ -373,7 +370,16 @@ func taintedNodes(state State, allocs []*structs.Allocation) (map[string]*struct
 		if structs.ShouldDrainNode(node.Status) || node.DrainStrategy != nil {
 			out[alloc.NodeID] = node
 		}
+
+		// If the node is in the disconnected state, add to the tainted set.
+		// Disconnected nodes must also be returned so that their
+		// ResumeAfterClientDisconnect configuration can be included in the
+		// timeout calculation.
+		if node.Status == structs.NodeStatusDisconnected {
+			out[alloc.NodeID] = node
+		}
 	}
+
 	return out, nil
 }
 
