@@ -9730,8 +9730,8 @@ func (a *Allocation) WaitClientStop() time.Time {
 	return t.Add(*tg.StopAfterClientDisconnect + kill)
 }
 
-// DisconnectTimeout uses the IgnoreClientDisconnect to block rescheduling until
-// the interval passes.
+// DisconnectTimeout uses the MaxClientDisconnect to compute when the allocation
+// should transition to lost.
 func (a *Allocation) DisconnectTimeout(now time.Time) time.Time {
 	tg := a.Job.LookupTaskGroup(a.TaskGroup)
 
