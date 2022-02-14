@@ -356,6 +356,10 @@ func progressMade(result *structs.PlanResult) bool {
 func taintedNodes(state State, allocs []*structs.Allocation) (map[string]*structs.Node, error) {
 	out := make(map[string]*structs.Node)
 	for _, alloc := range allocs {
+		if _, ok := out[alloc.NodeID]; ok {
+			continue
+		}
+
 		ws := memdb.NewWatchSet()
 		node, err := state.NodeByID(ws, alloc.NodeID)
 		if err != nil {
