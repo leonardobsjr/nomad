@@ -2403,6 +2403,15 @@ func (c *Client) updateAlloc(update *structs.Allocation) {
 		return
 	}
 
+	// Handle the situation where a client is reconnecting, the server has set the
+	// ClientStatus to unknown, and we need to actually report the current status
+	// of the allocation back to the server. Only update if the AllocModifyIndex
+	// is higher.
+	if update.ClientStatus == structs.AllocClientStatusUnknown && update.AllocModifyIndex > ar.Alloc().AllocModifyIndex {
+		update.ClientStatus = ar.Alloc().ClientStatus
+		update.ClientDescription = ar.Alloc().ClientDescription
+	}
+
 	// Update local copy of alloc
 	if err := c.stateDB.PutAllocation(update); err != nil {
 		c.logger.Error("error persisting updated alloc locally", "error", err, "alloc_id", update.ID)

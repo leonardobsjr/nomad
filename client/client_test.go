@@ -1704,3 +1704,109 @@ func Test_verifiedTasks(t *testing.T) {
 		try(t, alloc(tgTasks), tasks, tasks, "")
 	})
 }
+
+func TestClient_ReconnectAllocs(t *testing.T) {
+	t.Parallel()
+
+	s1, _, cleanupS1 := testServer(t, nil)
+	defer cleanupS1()
+	testutil.WaitForLeader(t, s1.RPC)
+
+	c1, cleanupC1 := TestClient(t, func(c *config.Config) {
+		c.DevMode = false
+		c.RPCHandler = s1
+	})
+	defer cleanupC1()
+
+	// Wait until the node is ready
+	waitTilNodeReady(c1, t)
+
+	// Create mock allocation that is running on the client.
+	job := mock.Job()
+	runningAlloc := mock.Alloc()
+	runningAlloc.NodeID = c1.Node().ID
+	runningAlloc.Job = job
+	runningAlloc.JobID = job.ID
+	runningAlloc.Job.TaskGroups[0].Tasks[0].Driver = "mock_driver"
+	runningAlloc.Job.TaskGroups[0].Tasks[0].Config = map[string]interface{}{
+		"run_for": "10s",
+	}
+	runningAlloc.ClientStatus = structs.AllocClientStatusRunning
+
+	state := s1.State()
+	err := state.UpsertJob(structs.MsgTypeTestSetup, 100, job)
+	require.NoError(t, err)
+
+	err = state.UpsertJobSummary(101, mock.JobSummary(runningAlloc.JobID))
+	require.NoError(t, err)
+
+	err = state.UpsertAllocs(structs.MsgTypeTestSetup, 102, []*structs.Allocation{runningAlloc})
+	require.NoError(t, err)
+
+	// Push this alloc update to the client
+	updates := &allocUpdates{
+		pulled: map[string]*structs.Allocation{
+			runningAlloc.ID: runningAlloc,
+		},
+	}
+	c1.runAllocs(updates)
+
+	// Ensure the allocation has been marked running on the server
+	testutil.WaitForResult(func() (bool, error) {
+		c1.allocLock.RLock()
+		ar := c1.allocs[runningAlloc.ID]
+		_, isInvalid := c1.invalidAllocs[runningAlloc.ID]
+		c1.allocLock.RUnlock()
+
+		require.NotNil(t, ar, "expected not nil alloc runner")
+		require.False(t, isInvalid, "expected alloc to not be marked invalid")
+
+		var alloc *structs.Allocation
+		alloc, err = s1.State().AllocByID(nil, runningAlloc.ID)
+
+		require.NoError(t, err)
+		require.Equal(t, structs.AllocClientStatusRunning, alloc.ClientStatus,
+			fmt.Sprintf("expected running client status, but got %v", alloc.ClientStatus))
+
+		return true, nil
+	}, func(err error) {
+		require.NoError(t, err)
+	})
+
+	// Create the unknown version of the alloc
+	unknownAlloc := runningAlloc.Copy()
+	unknownAlloc.ClientStatus = structs.AllocClientStatusUnknown
+
+	err = s1.State().UpsertAllocs(structs.MsgTypeTestSetup, 103, []*structs.Allocation{unknownAlloc})
+	require.NoError(t, err)
+
+	// Push this alloc update to the client
+	updates = &allocUpdates{
+		pulled: map[string]*structs.Allocation{
+			unknownAlloc.ID: unknownAlloc,
+		},
+	}
+	c1.runAllocs(updates)
+
+	// Ensure the allocation has been marked running on the server
+	testutil.WaitForResult(func() (bool, error) {
+		c1.allocLock.RLock()
+		ar := c1.allocs[unknownAlloc.ID]
+		_, isInvalid := c1.invalidAllocs[unknownAlloc.ID]
+		c1.allocLock.RUnlock()
+
+		require.NotNil(t, ar, "expected not nil alloc runner")
+		require.False(t, isInvalid, "expected alloc to not be marked invalid")
+
+		var alloc *structs.Allocation
+		alloc, err = s1.State().AllocByID(nil, unknownAlloc.ID)
+
+		require.NoError(t, err)
+		require.Equal(t, structs.AllocClientStatusRunning, alloc.ClientStatus,
+			fmt.Sprintf("expected running client status, but got %v", alloc.ClientStatus))
+
+		return true, nil
+	}, func(err error) {
+		require.NoError(t, err)
+	})
+}
