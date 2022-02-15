@@ -2270,6 +2270,8 @@ func (c *Client) runAllocs(update *allocUpdates) {
 	c.allocLock.RUnlock()
 
 	// Diff the existing and updated allocations
+	c.logger.Trace(fmt.Sprintf("runAllocs received %#v", update))
+	c.logger.Trace(fmt.Sprintf("runAllocs has %#v", existing))
 	diff := diffAllocs(existing, update)
 	c.logger.Debug("allocation updates", "added", len(diff.added), "removed", len(diff.removed),
 		"updated", len(diff.updated), "ignored", len(diff.ignore))
@@ -2397,6 +2399,7 @@ func (c *Client) removeAlloc(allocID string) {
 
 // updateAlloc is invoked when we should update an allocation
 func (c *Client) updateAlloc(update *structs.Allocation) {
+	c.logger.Trace(fmt.Sprintf("updateAlloc for allocID %q", update.ID))
 	ar, err := c.getAllocRunner(update.ID)
 	if err != nil {
 		c.logger.Warn("cannot update nonexistent alloc", "alloc_id", update.ID)
@@ -2408,8 +2411,11 @@ func (c *Client) updateAlloc(update *structs.Allocation) {
 	// of the allocation back to the server. Only update if the AllocModifyIndex
 	// is higher.
 	if update.ClientStatus == structs.AllocClientStatusUnknown && update.AllocModifyIndex > ar.Alloc().AllocModifyIndex {
+		c.logger.Trace(fmt.Sprintf("syncing client status for alloc %q", update.ID))
 		update.ClientStatus = ar.Alloc().ClientStatus
 		update.ClientDescription = ar.Alloc().ClientDescription
+	} else if update.ClientStatus == structs.AllocClientStatusUnknown {
+		c.logger.Trace(fmt.Sprintf("alloc is unknown but has modify index %q while runner has %q", update.AllocModifyIndex, ar.Alloc().AllocModifyIndex))
 	}
 
 	// Update local copy of alloc
