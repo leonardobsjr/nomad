@@ -24,9 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/blake2b"
-
 	"github.com/hashicorp/nomad/helper/escapingfs"
+	"golang.org/x/crypto/blake2b"
 
 	"github.com/hashicorp/cronexpr"
 	"github.com/hashicorp/go-msgpack/codec"
@@ -10252,20 +10251,7 @@ func (a *AllocMetric) MaxNormScore() *NodeScoreMeta {
 	if a == nil || len(a.ScoreMetaData) == 0 {
 		return nil
 	}
-
-	var maxNormScore *NodeScoreMeta
-	for _, scoreMetaData := range a.ScoreMetaData {
-		if maxNormScore == nil {
-			maxNormScore = scoreMetaData
-			continue
-		}
-
-		if scoreMetaData.NormScore > maxNormScore.NormScore {
-			maxNormScore = scoreMetaData
-		}
-	}
-
-	return maxNormScore
+	return a.ScoreMetaData[0]
 }
 
 // NodeScoreMeta captures scoring meta data derived from
@@ -10953,15 +10939,9 @@ func (p *Plan) AppendPreemptedAlloc(alloc *Allocation, preemptingAllocID string)
 
 // AppendUnknownAlloc marks an allocation as unknown.
 func (p *Plan) AppendUnknownAlloc(alloc *Allocation) {
-	// TODO (derek): review this with Tim
-
-	// Already created a copy in reconiler
-	//newAlloc := new(Allocation)
-	//*newAlloc = *alloc
-
-	// Not sure if these should be set to nil
+	// Strip the job as it's set once on the ApplyPlanResultRequest.
 	alloc.Job = nil
-	// Strip the resources as it can be rebuilt.
+	// Strip the resources as they can be rebuilt.
 	alloc.Resources = nil
 
 	existing := p.NodeAllocation[alloc.NodeID]
@@ -11069,7 +11049,7 @@ func (p *PlanResult) FullCommit(plan *Plan) (bool, int, int) {
 	actual := 0
 	for name, allocList := range plan.NodeAllocation {
 		for _, alloc := range allocList {
-			fmt.Println(fmt.Sprintf("FullCommit found NodeAllocation with client status %q", alloc.ClientStatus))
+			fmt.Println(fmt.Sprintf("FullCommit line 11052 alloc %q for node %q with status: %q", alloc.ID, alloc.NodeID, alloc.ClientStatus))
 		}
 		didAlloc := p.NodeAllocation[name]
 		expected += len(allocList)
