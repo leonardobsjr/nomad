@@ -669,6 +669,26 @@ func evaluateNodePlan(snap *state.StateSnapshot, plan *structs.Plan, nodeID stri
 	// the Raft commit happens.
 	if node == nil {
 		return false, "node does not exist", nil
+	} else if node.Status == structs.NodeStatusDisconnected {
+		nodeUpdate := plan.NodeUpdate[nodeID]
+		nodePreemptions := plan.NodePreemptions[nodeID]
+		nodeAllocations := plan.NodeAllocation[nodeID]
+		// If the node is disconnected, the plan is only valid if we must ensure
+		// that it only contains updates to mark the allocations as unknown. Any
+		// other updates for the node make the plan invalid.
+		if len(nodeUpdate) == 0 && len(nodePreemptions) == 0 {
+			invalid := false
+			for _, alloc := range nodeAllocations {
+				if alloc.ClientStatus != structs.AllocClientStatusUnknown {
+					invalid = true
+					break
+				}
+			}
+			if !invalid {
+				return true, "", nil
+			}
+		}
+		return false, "node is disconnected and contains invalid placements", nil
 	} else if node.Status != structs.NodeStatusReady {
 		return false, "node is not ready for placements", nil
 	} else if node.SchedulingEligibility == structs.NodeSchedulingIneligible {
