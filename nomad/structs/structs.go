@@ -4195,6 +4195,14 @@ type Job struct {
 	JobModifyIndex uint64
 }
 
+// GetID is a helper for getting the ID when the object may be nil
+func (j *Job) GetID() string {
+	if j == nil {
+		return ""
+	}
+	return j.ID
+}
+
 // NamespacedID returns the namespaced id useful for logging
 func (j *Job) NamespacedID() NamespacedID {
 	return NamespacedID{

@@ -2013,11 +2013,18 @@ func (s *StateStore) JobVersions(ws memdb.WatchSet) (memdb.ResultIterator, error
 }
 
 // Jobs returns an iterator over all the jobs
-func (s *StateStore) Jobs(ws memdb.WatchSet) (memdb.ResultIterator, error) {
+func (s *StateStore) Jobs(ws memdb.WatchSet, ascending bool) (memdb.ResultIterator, error) {
 	txn := s.db.ReadTxn()
 
-	// Walk the entire jobs table
-	iter, err := txn.Get("jobs", "id")
+	var iter memdb.ResultIterator
+	var err error
+
+	if ascending {
+		iter, err = txn.Get("jobs", "create")
+	} else {
+		iter, err = txn.GetReverse("jobs", "create")
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -2030,13 +2037,30 @@ func (s *StateStore) Jobs(ws memdb.WatchSet) (memdb.ResultIterator, error) {
 // JobsByNamespace returns an iterator over all the jobs for the given namespace
 func (s *StateStore) JobsByNamespace(ws memdb.WatchSet, namespace string) (memdb.ResultIterator, error) {
 	txn := s.db.ReadTxn()
-	return s.jobsByNamespaceImpl(ws, namespace, txn)
+	return s.jobsByNamespaceImpl(ws, namespace, false, txn)
+}
+
+// JobsByNamespaceOrdered returns an iterator over all the jobs for the given
+// namespace in a specific create index order.
+func (s *StateStore) JobsByNamespaceOrdered(ws memdb.WatchSet, namespace string, ascending bool) (memdb.ResultIterator, error) {
+	txn := s.db.ReadTxn()
+	return s.jobsByNamespaceImpl(ws, namespace, ascending, txn)
 }
 
 // jobsByNamespaceImpl returns an iterator over all the jobs for the given namespace
-func (s *StateStore) jobsByNamespaceImpl(ws memdb.WatchSet, namespace string, txn *txn) (memdb.ResultIterator, error) {
-	// Walk the entire jobs table
-	iter, err := txn.Get("jobs", "id_prefix", namespace, "")
+func (s *StateStore) jobsByNamespaceImpl(ws memdb.WatchSet, namespace string, ascending bool, txn *txn) (memdb.ResultIterator, error) {
+	var (
+		iter  memdb.ResultIterator
+		err   error
+		exact = terminate(namespace)
+	)
+
+	if ascending {
+		iter, err = txn.Get("jobs", "namespace_create_prefix", exact)
+	} else {
+		iter, err = txn.GetReverse("jobs", "namespace_create_prefix", exact)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -6023,7 +6047,7 @@ func (s *StateStore) DeleteNamespaces(index uint64, names []string) error {
 		}
 
 		// Ensure that the namespace doesn't have any non-terminal jobs
-		iter, err := s.jobsByNamespaceImpl(nil, name, txn)
+		iter, err := s.jobsByNamespaceImpl(nil, name, false, txn)
 		if err != nil {
 			return err
 		}

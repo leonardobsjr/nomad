@@ -197,7 +197,7 @@ func StateAsMap(state *state.StateStore) map[string][]interface{} {
 		"Indexes":          toArray(state.Indexes()),
 		"JobSummaries":     toArray(state.JobSummaries(nil)),
 		"JobVersions":      toArray(state.JobVersions(nil)),
-		"Jobs":             toArray(state.Jobs(nil)),
+		"Jobs":             toArray(state.Jobs(nil, false)),
 		"Nodes":            toArray(state.Nodes(nil)),
 		"PeriodicLaunches": toArray(state.PeriodicLaunches(nil)),
 		"SITokenAccessors": toArray(state.SITokenAccessors(nil)),

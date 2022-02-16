@@ -398,7 +398,7 @@ func getFuzzyResourceIterator(context structs.Context, aclObj *acl.ACL, namespac
 	switch context {
 	case structs.Jobs:
 		if wildcard(namespace) {
-			iter, err := state.Jobs(ws)
+			iter, err := state.Jobs(ws, false)
 			return nsCapIterFilter(iter, err, aclObj)
 		}
 		return state.JobsByNamespace(ws, namespace)

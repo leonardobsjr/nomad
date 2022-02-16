@@ -2019,7 +2019,7 @@ func TestStateStore_Jobs(t *testing.T) {
 	}
 
 	ws := memdb.NewWatchSet()
-	iter, err := state.Jobs(ws)
+	iter, err := state.Jobs(ws, false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

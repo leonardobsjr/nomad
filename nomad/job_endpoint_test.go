@@ -5151,6 +5151,250 @@ func TestJobEndpoint_ListJobs_Blocking(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_ListJobs_Pagination(t *testing.T) {
+	t.Parallel()
+	s1, _, cleanupS1 := TestACLServer(t, nil)
+	defer cleanupS1()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// create a set of jobs. these are in the order that the state store will
+	// return them from the iterator (sorted by key) for ease of writing tests
+	mocks := []struct {
+		name      string
+		namespace string
+		status    string
+	}{
+		{name: "job-01"}, // 0
+		{name: "job-02"}, // 1
+		{name: "job-03", namespace: "non-default"}, // 2
+		{name: "job-04"}, // 3
+		{name: "job-05", status: structs.JobStatusRunning}, // 4
+		{name: "job-06", status: structs.JobStatusRunning}, // 5
+	}
+
+	state := s1.fsm.State()
+	require.NoError(t, state.UpsertNamespaces(999, []*structs.Namespace{{Name: "non-default"}}))
+
+	for i, m := range mocks {
+		index := 1000 + uint64(i)
+		job := mock.Job()
+		job.ID = m.name
+		job.Name = m.name
+		job.Status = m.status
+		if m.namespace != "" { // defaults to "default"
+			job.Namespace = m.namespace
+		}
+		job.CreateIndex = index
+		require.NoError(t, state.UpsertJob(structs.MsgTypeTestSetup, index, job))
+	}
+
+	aclToken := mock.CreatePolicyAndToken(t, state, 1100, "test-valid-read",
+		mock.NamespacePolicy("*", "read", nil)).
+		SecretID
+
+	cases := []struct {
+		name              string
+		namespace         string
+		prefix            string
+		filter            string
+		nextToken         string
+		pageSize          int32
+		expectedNextToken string
+		expectedIDs       []string
+		expectedError     string
+	}{
+		{
+			name:              "test01 size-2 page-1 default NS",
+			pageSize:          2,
+			expectedNextToken: "job-04",
+			expectedIDs:       []string{"job-01", "job-02"},
+		},
+		{
+			name:              "test02 size-2 page-1 default NS with prefix",
+			prefix:            "job",
+			pageSize:          2,
+			expectedNextToken: "job-04",
+			expectedIDs:       []string{"job-01", "job-02"},
+		},
+		{
+			name:              "test03 size-2 page-2 default NS",
+			pageSize:          2,
+			nextToken:         "job-03",
+			expectedNextToken: "job-06",
+			expectedIDs:       []string{"job-04", "job-05"},
+		},
+		{
+			name:              "test04 size-2 page-2 default NS with prefix",
+			prefix:            "job",
+			pageSize:          2,
+			nextToken:         "job-04",
+			expectedNextToken: "job-06",
+			expectedIDs:       []string{"job-04", "job-05"},
+		},
+		{
+			name:        "test05 no valid results with filters and prefix",
+			prefix:      "not-job",
+			pageSize:    2,
+			nextToken:   "",
+			expectedIDs: []string{},
+		},
+		{
+			name:        "test06 go-bexpr filter",
+			namespace:   "*",
+			filter:      `Name matches "job-0[123]"`,
+			expectedIDs: []string{"job-01", "job-02", "job-03"},
+		},
+		{
+			name:              "test07 go-bexpr filter with pagination",
+			namespace:         "*",
+			filter:            `Name matches "job-0[123]"`,
+			pageSize:          2,
+			expectedNextToken: "job-03",
+			expectedIDs:       []string{"job-01", "job-02"},
+		},
+		{
+			name:        "test08 go-bexpr filter in namespace",
+			namespace:   "non-default",
+			filter:      `Status == "pending"`,
+			expectedIDs: []string{"job-03"},
+		},
+		{
+			name:          "test09 go-bexpr invalid expression",
+			filter:        `NotValid`,
+			expectedError: "failed to read filter expression",
+		},
+		{
+			name:          "test10 go-bexpr invalid field",
+			filter:        `InvalidField == "value"`,
+			expectedError: "error finding value in datum",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &structs.JobListRequest{
+				QueryOptions: structs.QueryOptions{
+					Region:    "global",
+					Namespace: tc.namespace,
+					Prefix:    tc.prefix,
+					Filter:    tc.filter,
+					PerPage:   tc.pageSize,
+					NextToken: tc.nextToken,
+					Ascending: true, // counting up is easier to think about
+				},
+			}
+			req.AuthToken = aclToken
+			var resp structs.JobListResponse
+			err := msgpackrpc.CallWithCodec(codec, "Job.List", req, &resp)
+			if tc.expectedError == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.expectedError)
+				return
+			}
+
+			gotIDs := []string{}
+			for _, job := range resp.Jobs {
+				gotIDs = append(gotIDs, job.ID)
+			}
+			require.Equal(t, tc.expectedIDs, gotIDs, "unexpected page of jobs")
+			require.Equal(t, tc.expectedNextToken, resp.QueryMeta.NextToken, "unexpected NextToken")
+		})
+	}
+}
+
+func TestJobEndpoint_ListJobs_Order(t *testing.T) {
+	t.Parallel()
+
+	s1, cleanupS1 := TestServer(t, nil)
+	defer cleanupS1()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create register requests
+	job1 := mock.Job()
+	job1.ID = "job-1"
+
+	job2 := mock.Job()
+	job2.ID = "job-2"
+
+	job3 := mock.Job()
+	job3.ID = "job-3"
+
+	err := s1.fsm.State().UpsertJob(structs.MsgTypeTestSetup, 1000, job1)
+	require.NoError(t, err)
+
+	err = s1.fsm.State().UpsertJob(structs.MsgTypeTestSetup, 1001, job2)
+	require.NoError(t, err)
+
+	err = s1.fsm.State().UpsertJob(structs.MsgTypeTestSetup, 1002, job3)
+	require.NoError(t, err)
+
+	// update job2 again so we can later assert create index order did not change
+	err = s1.fsm.State().UpsertJob(structs.MsgTypeTestSetup, 1003, job2)
+	require.NoError(t, err)
+
+	for _, ns := range []string{"default", "*"} {
+		t.Run(fmt.Sprintf("ascending in namespace %s", ns), func(t *testing.T) {
+			// Lookup the jobs in chronological order (oldest first)
+			get := &structs.JobListRequest{
+				QueryOptions: structs.QueryOptions{
+					Region:    "global",
+					Namespace: ns,
+					Ascending: true,
+				},
+			}
+
+			var resp structs.JobListResponse
+			err = msgpackrpc.CallWithCodec(codec, "Job.List", get, &resp)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1003), resp.Index)
+			require.Len(t, resp.Jobs, 3)
+
+			// Assert returned order is by CreateIndex (ascending)
+			require.Equal(t, uint64(1000), resp.Jobs[0].CreateIndex)
+			require.Equal(t, "job-1", resp.Jobs[0].ID)
+
+			require.Equal(t, uint64(1001), resp.Jobs[1].CreateIndex)
+			require.Equal(t, "job-2", resp.Jobs[1].ID)
+
+			require.Equal(t, uint64(1002), resp.Jobs[2].CreateIndex)
+			require.Equal(t, "job-3", resp.Jobs[2].ID)
+		})
+	}
+
+	for _, ns := range []string{"default", "*"} {
+		t.Run(fmt.Sprintf("descending in namespace %s", ns), func(t *testing.T) {
+			// Lookup the jobs in reverse chronological order (newest first)
+			get := &structs.JobListRequest{
+				QueryOptions: structs.QueryOptions{
+					Region:    "global",
+					Namespace: ns,
+					Ascending: false,
+				},
+			}
+
+			var resp structs.JobListResponse
+			err = msgpackrpc.CallWithCodec(codec, "Job.List", get, &resp)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1003), resp.Index)
+			require.Len(t, resp.Jobs, 3)
+
+			// Assert returned order is by CreateIndex (descending)
+			require.Equal(t, uint64(1002), resp.Jobs[0].CreateIndex)
+			require.Equal(t, "job-3", resp.Jobs[0].ID)
+
+			require.Equal(t, uint64(1001), resp.Jobs[1].CreateIndex)
+			require.Equal(t, "job-2", resp.Jobs[1].ID)
+
+			require.Equal(t, uint64(1000), resp.Jobs[2].CreateIndex)
+			require.Equal(t, "job-1", resp.Jobs[2].ID)
+		})
+	}
+}
+
 func TestJobEndpoint_Allocations(t *testing.T) {
 	t.Parallel()
 

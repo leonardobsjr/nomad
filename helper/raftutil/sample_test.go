@@ -43,7 +43,7 @@ func TestSampleInvariant(t *testing.T) {
 		summaryCount := summary.Children.Running + summary.Children.Pending + summary.Children.Dead
 		jobCountByParent := 0
 
-		iter, err := state.Jobs(nil)
+		iter, err := state.Jobs(nil, false)
 		require.NoError(t, err)
 		for {
 			rawJob := iter.Next()

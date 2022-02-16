@@ -1000,7 +1000,7 @@ func (s *Server) publishJobStatusMetrics(stopCh chan struct{}) {
 				continue
 			}
 			ws := memdb.NewWatchSet()
-			iter, err := state.Jobs(ws)
+			iter, err := state.Jobs(ws, false)
 			if err != nil {
 				s.logger.Error("failed to get job statuses", "error", err)
 				continue

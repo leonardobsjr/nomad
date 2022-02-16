@@ -1760,7 +1760,7 @@ func (n *nomadFSM) failLeakedDeployments(state *state.StateStore) error {
 func (n *nomadFSM) reconcileQueuedAllocations(index uint64) error {
 	// Get all the jobs
 	ws := memdb.NewWatchSet()
-	iter, err := n.state.Jobs(ws)
+	iter, err := n.state.Jobs(ws, false)
 	if err != nil {
 		return err
 	}
@@ -2043,7 +2043,7 @@ func (s *nomadSnapshot) persistJobs(sink raft.SnapshotSink,
 	encoder *codec.Encoder) error {
 	// Get all the jobs
 	ws := memdb.NewWatchSet()
-	jobs, err := s.snap.Jobs(ws)
+	jobs, err := s.snap.Jobs(ws, false)
 	if err != nil {
 		return err
 	}
