@@ -11324,6 +11324,14 @@ type ACLToken struct {
 	ModifyIndex uint64
 }
 
+// GetID is a helper for getting the ID when the object may be nil
+func (a *ACLToken) GetID() string {
+	if a == nil {
+		return ""
+	}
+	return a.AccessorID
+}
+
 func (a *ACLToken) Copy() *ACLToken {
 	c := new(ACLToken)
 	*c = *a
