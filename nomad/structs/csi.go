@@ -291,6 +291,14 @@ type CSIVolume struct {
 	ModifyIndex uint64
 }
 
+// GetID is a helper for getting the ID when the object may be nil
+func (v *CSIVolume) GetID() string {
+	if v == nil {
+		return ""
+	}
+	return v.ID
+}
+
 // CSIVolListStub is partial representation of a CSI Volume for inclusion in lists
 type CSIVolListStub struct {
 	ID                  string

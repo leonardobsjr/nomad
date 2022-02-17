@@ -843,6 +843,14 @@ func csiVolumeTableSchema() *memdb.TableSchema {
 					},
 				},
 			},
+			"create": {
+				Name:         "create",
+				AllowMissing: false,
+				Unique:       false,
+				Indexer: &memdb.UintFieldIndex{
+					Field: "CreateIndex",
+				},
+			},
 			"plugin_id": {
 				Name:         "plugin_id",
 				AllowMissing: false,

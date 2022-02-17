@@ -735,6 +735,275 @@ func TestCSIVolumeEndpoint_ListAllNamespaces(t *testing.T) {
 	require.Len(t, resp.Volumes, len(vols))
 }
 
+func TestCSIVolumeEndpoint_List_Pagination(t *testing.T) {
+	t.Parallel()
+	s1, cleanupS1 := TestServer(t, nil)
+	defer cleanupS1()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	nonDefaultNS := "non-default"
+
+	// create a set of volumes. these are in the order that the state store
+	// will return them from the iterator (sorted by create index), for ease of
+	// writing tests
+	mocks := []struct {
+		id        string
+		namespace string
+	}{
+		{id: "aaaa1111-3350-4b4b-d185-0e1992ed43e9"},                          // 0
+		{id: "aaaaaa22-3350-4b4b-d185-0e1992ed43e9"},                          // 1
+		{id: "aaaaaa33-3350-4b4b-d185-0e1992ed43e9", namespace: nonDefaultNS}, // 2
+		{id: "aaaaaaaa-3350-4b4b-d185-0e1992ed43e9"},                          // 3
+		{id: "aaaaaabb-3350-4b4b-d185-0e1992ed43e9"},                          // 4
+		{id: "aaaaaacc-3350-4b4b-d185-0e1992ed43e9"},                          // 5
+		{id: "aaaaaadd-3350-4b4b-d185-0e1992ed43e9"},                          // 6
+	}
+
+	state := s1.fsm.State()
+	plugin := mock.CSIPlugin()
+
+	// Create namespaces.
+	err := state.UpsertNamespaces(999, []*structs.Namespace{{Name: nonDefaultNS}})
+	require.NoError(t, err)
+
+	for i, m := range mocks {
+		index := 1000 + uint64(i)
+		volume := mock.CSIVolume(plugin)
+		volume.ID = m.id
+		volume.CreateIndex = index
+		if m.namespace != "" { // defaults to "default"
+			volume.Namespace = m.namespace
+		}
+		require.NoError(t, state.CSIVolumeRegister(index, []*structs.CSIVolume{volume}))
+	}
+
+	cases := []struct {
+		name              string
+		namespace         string
+		prefix            string
+		filter            string
+		nextToken         string
+		pageSize          int32
+		expectedNextToken string
+		expectedIDs       []string
+		expectedError     string
+	}{
+		{
+			name:              "test01 size-2 page-1 default NS",
+			pageSize:          2,
+			expectedNextToken: "aaaaaaaa-3350-4b4b-d185-0e1992ed43e9",
+			expectedIDs: []string{
+				"aaaa1111-3350-4b4b-d185-0e1992ed43e9",
+				"aaaaaa22-3350-4b4b-d185-0e1992ed43e9",
+			},
+		},
+		{
+			name:              "test02 size-2 page-1 default NS with prefix",
+			prefix:            "aaaa",
+			pageSize:          2,
+			expectedNextToken: "aaaaaaaa-3350-4b4b-d185-0e1992ed43e9",
+			expectedIDs: []string{
+				"aaaa1111-3350-4b4b-d185-0e1992ed43e9",
+				"aaaaaa22-3350-4b4b-d185-0e1992ed43e9",
+			},
+		},
+		{
+			name:              "test03 size-2 page-2 default NS",
+			pageSize:          2,
+			nextToken:         "aaaaaaaa-3350-4b4b-d185-0e1992ed43e9",
+			expectedNextToken: "aaaaaacc-3350-4b4b-d185-0e1992ed43e9",
+			expectedIDs: []string{
+				"aaaaaaaa-3350-4b4b-d185-0e1992ed43e9",
+				"aaaaaabb-3350-4b4b-d185-0e1992ed43e9",
+			},
+		},
+		{
+			name:              "test04 size-2 page-2 default NS with prefix",
+			prefix:            "aaaa",
+			pageSize:          2,
+			nextToken:         "aaaaaabb-3350-4b4b-d185-0e1992ed43e9",
+			expectedNextToken: "aaaaaadd-3350-4b4b-d185-0e1992ed43e9",
+			expectedIDs: []string{
+				"aaaaaabb-3350-4b4b-d185-0e1992ed43e9",
+				"aaaaaacc-3350-4b4b-d185-0e1992ed43e9",
+			},
+		},
+		{
+			name:        "test05 no valid results with filters and prefix",
+			prefix:      "cccc",
+			pageSize:    2,
+			nextToken:   "",
+			expectedIDs: []string{},
+		},
+		{
+			name:      "test06 go-bexpr filter",
+			namespace: "*",
+			filter:    `ID matches "^a+[123]"`,
+			expectedIDs: []string{
+				"aaaa1111-3350-4b4b-d185-0e1992ed43e9",
+				"aaaaaa22-3350-4b4b-d185-0e1992ed43e9",
+				"aaaaaa33-3350-4b4b-d185-0e1992ed43e9",
+			},
+		},
+		{
+			name:              "test07 go-bexpr filter with pagination",
+			namespace:         "*",
+			filter:            `ID matches "^a+[123]"`,
+			pageSize:          2,
+			expectedNextToken: "aaaaaa33-3350-4b4b-d185-0e1992ed43e9",
+			expectedIDs: []string{
+				"aaaa1111-3350-4b4b-d185-0e1992ed43e9",
+				"aaaaaa22-3350-4b4b-d185-0e1992ed43e9",
+			},
+		},
+		{
+			name:      "test08 go-bexpr filter in namespace",
+			namespace: "non-default",
+			filter:    `Provider == "com.hashicorp:mock"`,
+			expectedIDs: []string{
+				"aaaaaa33-3350-4b4b-d185-0e1992ed43e9",
+			},
+		},
+		{
+			name:        "test09 go-bexpr wrong namespace",
+			namespace:   "default",
+			filter:      `Namespace == "non-default"`,
+			expectedIDs: []string{},
+		},
+		{
+			name:          "test10 go-bexpr invalid expression",
+			filter:        `NotValid`,
+			expectedError: "failed to read filter expression",
+		},
+		{
+			name:          "test11 go-bexpr invalid field",
+			filter:        `InvalidField == "value"`,
+			expectedError: "error finding value in datum",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &structs.CSIVolumeListRequest{
+				QueryOptions: structs.QueryOptions{
+					Region:    "global",
+					Namespace: tc.namespace,
+					Prefix:    tc.prefix,
+					Filter:    tc.filter,
+					PerPage:   tc.pageSize,
+					NextToken: tc.nextToken,
+					Ascending: true, // counting up is easier to think about
+				},
+			}
+			var resp structs.CSIVolumeListResponse
+			err := msgpackrpc.CallWithCodec(codec, "CSIVolume.List", req, &resp)
+			if tc.expectedError == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.expectedError)
+				return
+			}
+
+			gotIDs := []string{}
+			for _, deployment := range resp.Volumes {
+				gotIDs = append(gotIDs, deployment.ID)
+			}
+			require.Equal(t, tc.expectedIDs, gotIDs, "unexpected page of volumes")
+			require.Equal(t, tc.expectedNextToken, resp.QueryMeta.NextToken, "unexpected NextToken")
+		})
+	}
+}
+
+func TestCSIVolumeEndpoint_List_Order(t *testing.T) {
+	t.Parallel()
+
+	s1, cleanupS1 := TestServer(t, nil)
+	defer cleanupS1()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	plugin := mock.CSIPlugin()
+
+	// Create register requests
+	uuid1 := uuid.Generate()
+	vol1 := mock.CSIVolume(plugin)
+	vol1.ID = uuid1
+
+	uuid2 := uuid.Generate()
+	vol2 := mock.CSIVolume(plugin)
+	vol2.ID = uuid2
+
+	uuid3 := uuid.Generate()
+	vol3 := mock.CSIVolume(plugin)
+	vol3.ID = uuid3
+
+	// bootstrap cluster with the first token
+	err := s1.State().CSIVolumeRegister(1000, []*structs.CSIVolume{vol1})
+	require.NoError(t, err)
+
+	err = s1.State().CSIVolumeRegister(1001, []*structs.CSIVolume{vol2})
+	require.NoError(t, err)
+
+	err = s1.State().CSIVolumeRegister(1002, []*structs.CSIVolume{vol3})
+	require.NoError(t, err)
+
+	t.Run("ascending", func(t *testing.T) {
+		// Lookup the jobs in chronological order (oldest first)
+		get := &structs.CSIVolumeListRequest{
+			QueryOptions: structs.QueryOptions{
+				Region:    "global",
+				Ascending: true,
+				Namespace: "*", // Sorting is currently only supported when namespace is *
+			},
+		}
+
+		var resp structs.CSIVolumeListResponse
+		err = msgpackrpc.CallWithCodec(codec, "CSIVolume.List", get, &resp)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1002), resp.Index)
+		require.Len(t, resp.Volumes, 3)
+
+		// Assert returned order is by CreateIndex (ascending)
+		require.Equal(t, uint64(1000), resp.Volumes[0].CreateIndex)
+		require.Equal(t, uuid1, resp.Volumes[0].ID)
+
+		require.Equal(t, uint64(1001), resp.Volumes[1].CreateIndex)
+		require.Equal(t, uuid2, resp.Volumes[1].ID)
+
+		require.Equal(t, uint64(1002), resp.Volumes[2].CreateIndex)
+		require.Equal(t, uuid3, resp.Volumes[2].ID)
+	})
+
+	t.Run("descending", func(t *testing.T) {
+		// Lookup the jobs in reverse chronological order (newest first)
+		get := &structs.CSIVolumeListRequest{
+			QueryOptions: structs.QueryOptions{
+				Region:    "global",
+				Ascending: false,
+				Namespace: "*", // Sorting is currently only supported when namespace is *
+			},
+		}
+
+		var resp structs.CSIVolumeListResponse
+		err = msgpackrpc.CallWithCodec(codec, "CSIVolume.List", get, &resp)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1002), resp.Index)
+		require.Len(t, resp.Volumes, 3)
+
+		// Assert returned order is by CreateIndex (descending)
+		require.Equal(t, uint64(1002), resp.Volumes[0].CreateIndex)
+		require.Equal(t, uuid3, resp.Volumes[0].ID)
+
+		require.Equal(t, uint64(1001), resp.Volumes[1].CreateIndex)
+		require.Equal(t, uuid2, resp.Volumes[1].ID)
+
+		require.Equal(t, uint64(1000), resp.Volumes[2].CreateIndex)
+		require.Equal(t, uuid1, resp.Volumes[2].ID)
+	})
+}
+
 func TestCSIVolumeEndpoint_Create(t *testing.T) {
 	t.Parallel()
 	var err error

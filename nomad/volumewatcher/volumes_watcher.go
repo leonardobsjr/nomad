@@ -132,7 +132,7 @@ func (w *Watcher) getVolumes(ctx context.Context, minIndex uint64) ([]*structs.C
 // getVolumesImpl retrieves all volumes from the passed state store.
 func (w *Watcher) getVolumesImpl(ws memdb.WatchSet, state *state.StateStore) (interface{}, uint64, error) {
 
-	iter, err := state.CSIVolumes(ws)
+	iter, err := state.CSIVolumes(ws, false)
 	if err != nil {
 		return nil, 0, err
 	}
