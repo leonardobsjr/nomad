@@ -2,6 +2,7 @@ package allocrunner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -212,11 +213,10 @@ func (c *csiHook) claimVolumesFromAlloc() (map[string]*volumeAndRequest, error) 
 			},
 		}
 
-		var resp structs.CSIVolumeClaimResponse
-		if err := c.rpcClient.RPC("CSIVolume.Claim", req, &resp); err != nil {
+		resp, err := c.claimWithRetry(req)
+		if err != nil {
 			return nil, fmt.Errorf("could not claim volume %s: %w", req.VolumeID, err)
 		}
-
 		if resp.Volume == nil {
 			return nil, fmt.Errorf("Unexpected nil volume returned for ID: %v", pair.request.Source)
 		}
@@ -227,6 +227,49 @@ func (c *csiHook) claimVolumesFromAlloc() (map[string]*volumeAndRequest, error) 
 	}
 
 	return result, nil
+}
+
+// claimWithRetry tries to claim the volume on the server, retrying
+// with exponential backoff capped to a maximum interval
+func (c *csiHook) claimWithRetry(req *structs.CSIVolumeClaimRequest) (*structs.CSIVolumeClaimResponse, error) {
+
+	// note: allocrunner hooks don't have access to the client's
+	// shutdown context, just the allocrunner's shutdown; if we make
+	// it available in the future we should thread it through here so
+	// that retry can exit gracefully instead of dropping the
+	// in-flight goroutine
+	ctx, cancel := context.WithTimeout(context.TODO(), c.maxBackoffDuration)
+	defer cancel()
+
+	var resp *structs.CSIVolumeClaimResponse
+	var err error
+	backoff := time.Second
+	ticker := time.NewTicker(0)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-ticker.C:
+		}
+
+		err = c.rpcClient.RPC("CSIVolume.Claim", req, &resp)
+		if err == nil {
+			break
+		}
+		if !errors.Is(structs.ErrCSIVolumeMaxClaims, err) {
+			break
+		}
+
+		if backoff < c.maxBackoffInterval {
+			backoff = backoff * 2
+			if backoff > c.maxBackoffInterval {
+				backoff = c.maxBackoffInterval
+			}
+		}
+		ticker.Reset(backoff)
+	}
+	return resp, err
 }
 
 func (c *csiHook) shouldRun() bool {
