@@ -242,7 +242,6 @@ func (a allocSet) filterByTainted(taintedNodes map[string]*structs.Node) (untain
 				reconnecting[alloc.ID] = alloc
 				continue
 			}
-
 			// Otherwise, Node is untainted so alloc is untainted
 			untainted[alloc.ID] = alloc
 			continue
@@ -277,7 +276,6 @@ func (a allocSet) filterByTainted(taintedNodes map[string]*structs.Node) (untain
 			lost[alloc.ID] = alloc
 			continue
 		}
-
 		// All other allocs are untainted
 		untainted[alloc.ID] = alloc
 

@@ -385,9 +385,6 @@ func (a *allocReconciler) computeGroup(groupName string, all allocSet) bool {
 	tg := a.job.LookupTaskGroup(groupName)
 
 	// DEBUG: DO NOT MERGE
-	for _, node := range a.taintedNodes {
-		a.logger.Trace(fmt.Sprintf("computing group for node: %q with status %q", node.ID, node.Status))
-	}
 	tg.MaxClientDisconnect = helper.TimeToPtr(60 * time.Minute)
 
 	// If the task group is nil, then the task group has been removed so all we
@@ -408,8 +405,6 @@ func (a *allocReconciler) computeGroup(groupName string, all allocSet) bool {
 
 	// Determine what set of allocations are on tainted nodes
 	untainted, migrate, lost, disconnecting, reconnecting := all.filterByTainted(a.taintedNodes)
-	a.logger.Trace(fmt.Sprintf("disconnecting: %#v", disconnecting))
-	a.logger.Trace(fmt.Sprintf("reconnecting: %#v", reconnecting))
 
 	// Determine what set of terminal allocations need to be rescheduled
 	untainted, rescheduleNow, rescheduleLater := untainted.filterByRescheduleable(a.batch, a.now, a.evalID, a.deployment)
@@ -500,14 +495,6 @@ func (a *allocReconciler) computeGroup(groupName string, all allocSet) bool {
 
 	deploymentComplete := a.isDeploymentComplete(groupName, destructive, inplace,
 		migrate, rescheduleNow, dstate, place, rescheduleLater, requiresCanaries)
-
-	for _, update := range a.result.disconnectUpdates {
-		a.logger.Trace(fmt.Sprintf("disconnectUpdate: alloc %q for node %q with client status %q", update.ID, update.NodeID, update.ClientStatus))
-	}
-
-	for _, update := range a.result.reconnectUpdates {
-		a.logger.Trace(fmt.Sprintf("reconnectUpdate: alloc %q for node %q with client status %q", update.ID, update.NodeID, update.ClientStatus))
-	}
 
 	return deploymentComplete
 }
@@ -1037,6 +1024,7 @@ func (a *allocReconciler) computeStopByReconnecting(untainted, reconnecting, sto
 			if remove == 0 {
 				return remove
 			}
+			continue
 		}
 
 		// Compare reconnecting to untainted and decide which to keep.
@@ -1151,7 +1139,6 @@ func (a *allocReconciler) computeReconnecting(reconnecting allocSet) {
 			continue
 		}
 
-		a.logger.Trace(fmt.Sprintf("alloc %q queued for reconnect: %#v", alloc.ID, alloc))
 		a.result.reconnectUpdates[alloc.ID] = alloc.Copy()
 	}
 }
@@ -1291,7 +1278,6 @@ func (a *allocReconciler) createTimeoutLaterEvals(disconnecting allocSet, tgName
 		a.result.disconnectUpdates[updatedAlloc.ID] = updatedAlloc
 	}
 
-	a.logger.Trace(fmt.Sprintf("disconnecting allocs generated follow up evals: %#v", evals))
 	a.appendFollowupEvals(tgName, evals)
 
 	return allocIDToFollowupEvalID
